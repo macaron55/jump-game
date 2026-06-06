@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="ja" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <!-- スマホでの拡大縮小・はみ出しを防ぐ viewport 設定 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>ジャンピングアドベンチャー</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&amp;family=Noto+Sans+JP:wght@700;900&amp;display=swap" rel="stylesheet">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      /* スマホ特有の挙動を無効化（ダブルタップズーム・長押し選択・タップハイライト） */
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+      position: fixed;
+      inset: 0;
+    }
+    .game-wrapper {
+      height: 100%;
+      width: 100%;
+      position: relative;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      touch-action: none;
+    }
+    canvas { touch-action: none; display: block; }
+    @keyframes firework { 0% { transform: translateY(0) scale(0); opacity:1; } 50% { opacity:1; } 100% { transform: translateY(-200px) scale(2); opacity:0; } }
+    @keyframes lightning { 0%,100% { opacity:0; } 10%,30%,50% { opacity:1; } 20%,40% { opacity:0; } }
+    .firework-particle { animation: firework 1.5s ease-out forwards; position: absolute; border-radius: 50%; }
+    .lightning-flash { animation: lightning 0.8s ease-in-out; position: absolute; inset:0; background: rgba(255,255,255,0.9); pointer-events:none; z-index:100; }
+ 
+    /* ===== バーチャルコントローラー ===== */
+    .touch-controls {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      z-index: 40;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding: 16px;
+      padding-bottom: max(16px, env(safe-area-inset-bottom));
+      pointer-events: none; /* 子要素だけ反応させる */
+    }
+    .touch-controls.hidden { display: none; }
+    .pad-group { display: flex; gap: 14px; pointer-events: none; }
+    .ctrl-btn {
+      pointer-events: auto;
+      width: 68px; height: 68px;
+      border-radius: 50%;
+      border: none;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px; font-weight: 900; color: #fff;
+      background: rgba(255,255,255,0.18);
+      backdrop-filter: blur(4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      user-select: none; -webkit-user-select: none;
+      touch-action: none;
+      transition: transform 0.08s, background 0.08s;
+    }
+    .ctrl-btn:active, .ctrl-btn.pressed { transform: scale(0.9); background: rgba(255,255,255,0.4); }
+    .jump-btn {
+      pointer-events: auto;
+      width: 96px; height: 96px;
+      border-radius: 50%;
+      border: none;
+      color: #fff; font-size: 16px; font-weight: 900;
+      font-family: 'Noto Sans JP', sans-serif;
+      background: linear-gradient(135deg, #ec4899, #8b5cf6);
+      box-shadow: 0 6px 18px rgba(139,92,246,0.6);
+      user-select: none; -webkit-user-select: none;
+      touch-action: none;
+      transition: transform 0.08s;
+    }
+    .jump-btn:active, .jump-btn.pressed { transform: scale(0.92); }
+  </style>
+ </head>
+ <body class="h-full w-full bg-gradient-to-br from-blue-900 to-blue-800">
+  <div class="game-wrapper" id="gameWrapper">
+   <div id="startScreen" class="absolute inset-0 flex flex-col items-center justify-center z-50" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);">
+    <h1 class="text-3xl sm:text-4xl md:text-5xl text-yellow-300 mb-8 text-center px-4" style="font-family:'Press Start 2P',cursive; text-shadow: 0 0 20px #ffd700; line-height:1.4;">ジャンピング<br>
+      アドベンチャー</h1>
+    <div class="flex gap-8 mb-8 items-end">
+     <img src="boy.png" alt="男の子" style="height:120px; width:auto;">
+     <img src="penguin.png" alt="ペンギン" style="height:120px; width:auto;">
+    </div><button id="startBtn" class="px-8 py-4 bg-gradient-to-r from-pink-500 to-purple-600 text-white text-xl font-bold rounded-xl active:scale-95 hover:scale-110 transition-transform shadow-lg shadow-purple-500/50" style="font-family:'Noto Sans JP',sans-serif;">▶ スタート</button>
+    <p class="text-gray-400 mt-4 text-sm text-center px-4" style="font-family:'Noto Sans JP',sans-serif;">スペースキー / 画面タップ / ジャンプボタン</p>
+   </div>
+   <canvas id="gameCanvas" class="absolute inset-0 w-full h-full"></canvas>
+   <div id="hud" class="absolute top-4 left-4 right-4 flex justify-between items-center z-30 hidden">
+    <div class="bg-black/60 text-white px-4 py-2 rounded-lg" style="font-family:'Press Start 2P',cursive; font-size:14px;">
+     <span id="timerDisplay">90</span>s
+    </div>
+    <div class="bg-black/60 text-yellow-300 px-4 py-2 rounded-lg" style="font-family:'Press Start 2P',cursive; font-size:14px;">
+     スコア: <span id="scoreDisplay">0</span>
+    </div>
+   </div>
+ 
+   <!-- ===== バーチャルコントローラー（スマホ／タッチ用） ===== -->
+   <div id="touchControls" class="touch-controls hidden">
+     <div class="pad-group">
+       <button id="btnLeft" class="ctrl-btn" aria-label="左">◀</button>
+       <button id="btnRight" class="ctrl-btn" aria-label="右">▶</button>
+     </div>
+     <button id="btnJump" class="jump-btn" aria-label="ジャンプ">ジャンプ</button>
+   </div>
+ 
+   <div id="resultOverlay" class="absolute inset-0 flex flex-col items-center justify-center z-50 hidden" style="background: rgba(0,0,0,0.8);">
+    <div id="fireworksContainer" class="absolute inset-0 pointer-events-none"></div>
+    <div id="lightningContainer"></div>
+    <div id="resultContent" class="text-center z-10 px-4"></div>
+   </div>
+  </div>
+  <script>
+    /* ================= サウンド ================= */
+    let audioCtx;
+    function getAudioCtx() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      return audioCtx;
+    }
+    let bgmInterval;
+    function startBGM() {
+      const ctx = getAudioCtx();
+      if (!ctx) return;
+      const notes = [261.63, 329.63, 392, 523.25, 392, 329.63, 261.63, 196, 261.63, 329.63, 392, 440, 392, 329.63, 261.63, 196];
+      let i = 0;
+      bgmInterval = setInterval(() => {
+        try {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'triangle';
+          osc.frequency.value = notes[i % notes.length];
+          gain.gain.setValueAtTime(0.05, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+          osc.start(); osc.stop(ctx.currentTime + 0.3);
+          i++;
+        } catch (e) {}
+      }, 250);
+    }
+    function stopBGM() { clearInterval(bgmInterval); }
+    function fireworkSound() {
+      try {
+        const ctx = getAudioCtx();
+        const bufferSize = ctx.sampleRate * 0.5;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+        const src = ctx.createBufferSource(); src.buffer = buffer;
+        const gain = ctx.createGain(); gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        src.connect(gain); gain.connect(ctx.destination); src.start();
+      } catch (e) {}
+    }
+    function coinCollectSound() {
+      try {
+        const ctx = getAudioCtx();
+        const osc = ctx.createOscillator(); const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        osc.start(); osc.stop(ctx.currentTime + 0.15);
+      } catch (e) {}
+    }
+    function thunderSound() {
+      try {
+        const ctx = getAudioCtx();
+        const bufferSize = ctx.sampleRate * 1;
+        const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufferSize, 0.5);
+        const src = ctx.createBufferSource(); src.buffer = buffer;
+        const gain = ctx.createGain(); gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        src.connect(gain); gain.connect(ctx.destination); src.start();
+      } catch (e) {}
+    }
+ 
+    /* ================= 画像（差し替え可能） ================= */
+    // 自分のイラストに差し替えたい場合は、下の URL を画像ファイルのパスに変更してください。
+    // 例: PLAYER_IMG_SRC = 'boy.png';  PENGUIN_IMG_SRC = 'penguin.png';
+    const PLAYER_IMG_SRC = 'boy.png';   // 男の子のイラスト（実画像）
+    const PENGUIN_IMG_SRC = 'penguin.png';  // ペンギンのイラスト（実画像）
+    const playerImg = new Image();
+    const penguinImg = new Image();
+    let playerImgReady = false, penguinImgReady = false;
+    if (PLAYER_IMG_SRC) { playerImg.onload = () => playerImgReady = true; playerImg.src = PLAYER_IMG_SRC; }
+    if (PENGUIN_IMG_SRC) { penguinImg.onload = () => penguinImgReady = true; penguinImg.src = PENGUIN_IMG_SRC; }
+ 
+    /* ================= ゲーム本体 ================= */
+    const canvas = document.getElementById('gameCanvas');
+    const ctx2d = canvas.getContext('2d');
+    let gameRunning = false, timeLeft = 90, score = 0, gameOver = false;
+    const SCALE = 3; // ★ すべての大きさ・動きを3倍に
+    let player = { x: 100, y: 0, vy: 0, jumping: false, w: 40 * SCALE, h: 50 * SCALE };
+    let facing = 1; // 1=右向き（進行方向）, -1=左向き
+    let missiles = [];       // 上から降ってくるミサイル
+    let missileHitCount = 0; // ミサイル被弾数（5回でゲームオーバー）
+    let obstacles = [], coins = [], groundY = 0;
+    let frameId, timerInterval;
+    let keysPressed = {};
+    // バーチャルパッドの左右入力状態
+    let touchMove = { left: false, right: false };
+    let distance = 0, scrollSpeed = 4;
+    let collisionCount = 0;
+    // ★ ゴール距離を今の半分に（15000 × SCALE ÷ 2 = 22500）
+    let goalDist = 15000 * SCALE / 2;
+ 
+    function resizeCanvas() {
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      canvas.width = w;
+      canvas.height = h;
+      groundY = canvas.height - 60;
+      if (!gameRunning) player.y = groundY - player.h;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 200));
+ 
+    function jump() {
+      if (!gameRunning || gameOver) return;
+      if (!player.jumping) { player.vy = -14 * SCALE; player.jumping = true; }
+    }
+ 
+    /* ---- キーボード操作（PC） ---- */
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); jump(); }
+      keysPressed[e.code] = true;
+    });
+    document.addEventListener('keyup', (e) => { keysPressed[e.code] = false; });
+ 
+    /* ---- 画面タップ／クリックでジャンプ ---- */
+    canvas.addEventListener('click', jump);
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); }, { passive: false });
+ 
+    /* ---- バーチャルパッド（タッチ＆マウス両対応：pointer events） ---- */
+    function bindHold(el, onDown, onUp) {
+      const down = (e) => { e.preventDefault(); el.classList.add('pressed'); onDown(); };
+      const up = (e) => { if (e) e.preventDefault(); el.classList.remove('pressed'); onUp(); };
+      el.addEventListener('pointerdown', down);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+      el.addEventListener('pointerleave', up);
+      el.addEventListener('touchstart', down, { passive: false });
+      el.addEventListener('touchend', up, { passive: false });
+    }
+    bindHold(document.getElementById('btnLeft'),  () => touchMove.left = true,  () => touchMove.left = false);
+    bindHold(document.getElementById('btnRight'), () => touchMove.right = true, () => touchMove.right = false);
+    {
+      const jb = document.getElementById('btnJump');
+      const j = (e) => { e.preventDefault(); jb.classList.add('pressed'); jump(); };
+      const ju = (e) => { if (e) e.preventDefault(); jb.classList.remove('pressed'); };
+      jb.addEventListener('pointerdown', j);
+      jb.addEventListener('pointerup', ju);
+      jb.addEventListener('pointercancel', ju);
+      jb.addEventListener('touchstart', j, { passive: false });
+      jb.addEventListener('touchend', ju, { passive: false });
+    }
+ 
+    /* ---- スマホのダブルタップズーム等を抑止 ---- */
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', (e) => {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) e.preventDefault();
+      lastTouchEnd = now;
+    }, { passive: false });
+ 
+    function spawnObstacle() {
+      if (Math.random() < 0.015) {
+        const playerWorldX = player.x + distance;
+        const newX = playerWorldX + canvas.width + 100 + Math.random() * 200;
+        if (newX < goalDist - 200) {
+          obstacles.push({ x: newX, w: (30 + Math.random() * 20) * SCALE, h: (30 + Math.random() * 30) * SCALE });
+        }
+      }
+    }
+    function spawnCoin() {
+      if (Math.random() < 0.05) {
+        const playerWorldX = player.x + distance;
+        const newX = playerWorldX + canvas.width / 2 + Math.random() * 200;
+        const newY = groundY - (50 + Math.random() * 60) * SCALE;
+        if (newX < goalDist - 100) {
+          coins.push({ x: newX, y: newY, collected: false, rotation: 0 });
+        }
+      }
+    }
+ 
+    // 上から降ってくるミサイル
+    function spawnMissile() {
+      if (Math.random() < 0.02) {
+        const w = 14 * SCALE, h = 34 * SCALE;
+        const mx = Math.random() * (canvas.width - w);
+        missiles.push({ x: mx, y: -h, vy: (4 + Math.random() * 3) * SCALE, w: w, h: h });
+      }
+    }
+    function drawMissile(m) {
+      const c = ctx2d;
+      c.save();
+      c.translate(m.x + m.w / 2, m.y);
+      // 炎（後方＝上）
+      c.fillStyle = '#f1c40f';
+      c.beginPath();
+      c.moveTo(-m.w * 0.25, 0); c.lineTo(m.w * 0.25, 0);
+      c.lineTo(0, -m.h * 0.5 - Math.random() * m.h * 0.3); c.closePath(); c.fill();
+      c.fillStyle = '#e67e22';
+      c.beginPath();
+      c.moveTo(-m.w * 0.15, 0); c.lineTo(m.w * 0.15, 0);
+      c.lineTo(0, -m.h * 0.35); c.closePath(); c.fill();
+      // 本体（下向き）
+      c.fillStyle = '#c0392b';
+      c.fillRect(-m.w * 0.25, 0, m.w * 0.5, m.h * 0.7);
+      // 先端（下が尖る）
+      c.fillStyle = '#7f8c8d';
+      c.beginPath();
+      c.moveTo(-m.w * 0.25, m.h * 0.7); c.lineTo(m.w * 0.25, m.h * 0.7);
+      c.lineTo(0, m.h); c.closePath(); c.fill();
+      // 翼
+      c.fillStyle = '#922b21';
+      c.beginPath();
+      c.moveTo(-m.w * 0.25, m.h * 0.55); c.lineTo(-m.w * 0.5, m.h * 0.78);
+      c.lineTo(-m.w * 0.25, m.h * 0.78); c.fill();
+      c.beginPath();
+      c.moveTo(m.w * 0.25, m.h * 0.55); c.lineTo(m.w * 0.5, m.h * 0.78);
+      c.lineTo(m.w * 0.25, m.h * 0.78); c.fill();
+      c.restore();
+    }
+ 
+    // 男の子（オリーブ系ボブ＋グレーパーカー＋ジーンズ）をアップ画像に寄せて描画
+    function drawCharacter(x, y) {
+      if (playerImgReady) {
+        const bh = player.h * 1.7;                            // 表示する高さ
+        const bw = bh * (playerImg.width / playerImg.height); // 縦横比を保つ
+        const cxp = x + player.w / 2;
+        const topY = (y + player.h) - bh;
+        ctx2d.save();
+        if (facing === -1) {                // 左を向く＝左右反転（元画像は右向き）
+          ctx2d.translate(cxp + bw / 2, topY);
+          ctx2d.scale(-1, 1);
+          ctx2d.drawImage(playerImg, 0, 0, bw, bh);
+        } else {                            // 右（進行方向）＝そのまま
+          ctx2d.drawImage(playerImg, cxp - bw / 2, topY, bw, bh);
+        }
+        ctx2d.restore();
+        return;
+      }
+      const cx = x + player.w / 2; // 中心
+      ctx2d.lineJoin = 'round';
+      // 脚（ジーンズ）
+      ctx2d.fillStyle = '#bcd6ea';
+      ctx2d.fillRect(x + 11, y + 33, 7, 16);
+      ctx2d.fillRect(x + 22, y + 33, 7, 16);
+      ctx2d.fillStyle = '#a9c6dd';
+      ctx2d.fillRect(x + 11, y + 33, 2, 16);
+      ctx2d.fillRect(x + 22, y + 33, 2, 16);
+      // 靴（白スニーカー）
+      ctx2d.fillStyle = '#f3f4f6';
+      ctx2d.beginPath(); ctx2d.ellipse(x + 14, y + 50, 6, 3.5, 0, 0, Math.PI * 2); ctx2d.fill();
+      ctx2d.beginPath(); ctx2d.ellipse(x + 26, y + 50, 6, 3.5, 0, 0, Math.PI * 2); ctx2d.fill();
+      ctx2d.strokeStyle = '#cbd5e1'; ctx2d.lineWidth = 1;
+      ctx2d.beginPath(); ctx2d.ellipse(x + 14, y + 50, 6, 3.5, 0, 0, Math.PI * 2); ctx2d.stroke();
+      ctx2d.beginPath(); ctx2d.ellipse(x + 26, y + 50, 6, 3.5, 0, 0, Math.PI * 2); ctx2d.stroke();
+      // 上げた腕（指さしポーズ）
+      ctx2d.strokeStyle = '#9aa1aa'; ctx2d.lineWidth = 6; ctx2d.lineCap = 'round';
+      ctx2d.beginPath(); ctx2d.moveTo(x + 29, y + 26); ctx2d.lineTo(x + 33, y + 10); ctx2d.stroke();
+      ctx2d.fillStyle = '#ffe0bd';
+      ctx2d.beginPath(); ctx2d.arc(x + 33, y + 7, 3, 0, Math.PI * 2); ctx2d.fill();
+      // パーカー本体（グレー）
+      ctx2d.fillStyle = '#9aa1aa';
+      ctx2d.beginPath();
+      ctx2d.moveTo(x + 8, y + 23);
+      ctx2d.lineTo(x + 30, y + 23);
+      ctx2d.lineTo(x + 33, y + 40);
+      ctx2d.lineTo(x + 6, y + 40);
+      ctx2d.closePath(); ctx2d.fill();
+      // 下げた腕（左）
+      ctx2d.strokeStyle = '#9aa1aa'; ctx2d.lineWidth = 6;
+      ctx2d.beginPath(); ctx2d.moveTo(x + 9, y + 25); ctx2d.lineTo(x + 6, y + 37); ctx2d.stroke();
+      ctx2d.fillStyle = '#ffe0bd';
+      ctx2d.beginPath(); ctx2d.arc(x + 6, y + 38, 2.8, 0, Math.PI * 2); ctx2d.fill();
+      // パーカーの陰＆ポケット
+      ctx2d.fillStyle = '#868d96';
+      ctx2d.fillRect(x + 6, y + 36, 27, 4);
+      ctx2d.strokeStyle = '#7d848d'; ctx2d.lineWidth = 1.2;
+      ctx2d.beginPath(); ctx2d.moveTo(x + 13, y + 33); ctx2d.lineTo(x + 26, y + 33); ctx2d.stroke();
+      // 首元のピンク
+      ctx2d.fillStyle = '#f7c5cd';
+      ctx2d.fillRect(x + 15, y + 21, 10, 4);
+      // 顔
+      ctx2d.fillStyle = '#ffe0bd';
+      ctx2d.beginPath(); ctx2d.arc(cx, y + 12, 11, 0, Math.PI * 2); ctx2d.fill();
+      // 髪（オリーブ系ボブ）
+      ctx2d.fillStyle = '#c3ad57';
+      ctx2d.beginPath();
+      ctx2d.arc(cx, y + 10, 12, Math.PI, 0);
+      ctx2d.lineTo(cx + 12, y + 17);
+      ctx2d.lineTo(cx + 7, y + 16);
+      ctx2d.lineTo(cx + 6, y + 9);
+      ctx2d.lineTo(cx + 1, y + 14);
+      ctx2d.lineTo(cx - 3, y + 9);
+      ctx2d.lineTo(cx - 7, y + 14);
+      ctx2d.lineTo(cx - 7, y + 16);
+      ctx2d.lineTo(cx - 12, y + 17);
+      ctx2d.closePath(); ctx2d.fill();
+      ctx2d.fillStyle = '#a8923f';
+      ctx2d.fillRect(cx - 12, y + 12, 2, 5);
+      // 目（グリーン）
+      ctx2d.fillStyle = '#2e8b57';
+      ctx2d.beginPath(); ctx2d.arc(cx - 4, y + 13, 2, 0, Math.PI * 2); ctx2d.fill();
+      ctx2d.beginPath(); ctx2d.arc(cx + 4, y + 13, 2, 0, Math.PI * 2); ctx2d.fill();
+      ctx2d.fillStyle = '#fff';
+      ctx2d.fillRect(cx - 5, y + 12, 1, 1);
+      ctx2d.fillRect(cx + 3, y + 12, 1, 1);
+      // 口（微笑み）
+      ctx2d.strokeStyle = '#c98a6b'; ctx2d.lineWidth = 1.2; ctx2d.lineCap = 'round';
+      ctx2d.beginPath(); ctx2d.arc(cx, y + 16, 2.5, 0.2 * Math.PI, 0.8 * Math.PI); ctx2d.stroke();
+      ctx2d.lineCap = 'butt';
+    }
+ 
+    // きらめき（ペンギン用）
+    function drawSparkle(c, x, y, r) {
+      c.save(); c.translate(x, y); c.fillStyle = '#ffd54a';
+      c.beginPath();
+      c.moveTo(0, -r); c.quadraticCurveTo(0, 0, r, 0);
+      c.quadraticCurveTo(0, 0, 0, r); c.quadraticCurveTo(0, 0, -r, 0);
+      c.quadraticCurveTo(0, 0, 0, -r);
+      c.fill(); c.restore();
+    }
+ 
+    // まんまるペンギン（クリーム色パーカー・ほっぺピンク・にっこり目）をアップ画像に寄せて描画
+    function drawPenguin(x, y, scale) {
+      scale = scale || 1;
+      if (penguinImgReady) {
+        const ph = 45 * scale;                                  // 表示する高さ
+        const pw = ph * (penguinImg.width / penguinImg.height); // 縦横比を保つ
+        const cxp = x + 17;                                     // ゴールのペンギン中心X
+        ctx2d.drawImage(penguinImg, cxp - pw / 2, groundY - ph, pw, ph);
+        return;
+      }
+      ctx2d.save();
+      ctx2d.translate(x, y);
+      ctx2d.scale(scale, scale);
+      ctx2d.lineJoin = 'round';
+      // きらめき
+      drawSparkle(ctx2d, -4, 2, 3);
+      drawSparkle(ctx2d, 38, -2, 3.5);
+      drawSparkle(ctx2d, 7, -6, 2);
+      // 足（オレンジ）
+      ctx2d.fillStyle = '#f5a623';
+      ctx2d.beginPath(); ctx2d.ellipse(11, 41, 5, 3, 0, 0, Math.PI * 2); ctx2d.fill();
+      ctx2d.beginPath(); ctx2d.ellipse(23, 41, 5, 3, 0, 0, Math.PI * 2); ctx2d.fill();
+      // 体（チャコール）
+      ctx2d.fillStyle = '#3f444a';
+      ctx2d.beginPath(); ctx2d.ellipse(17, 22, 16, 19, 0, 0, Math.PI * 2); ctx2d.fill();
+      // 上げた羽（バンザイ）
+      ctx2d.fillStyle = '#3f444a';
+      ctx2d.save(); ctx2d.translate(2, 16); ctx2d.rotate(-0.5);
+      ctx2d.beginPath(); ctx2d.ellipse(0, 0, 4, 9, 0, 0, Math.PI * 2); ctx2d.fill(); ctx2d.restore();
+      ctx2d.save(); ctx2d.translate(32, 16); ctx2d.rotate(0.5);
+      ctx2d.beginPath(); ctx2d.ellipse(0, 0, 4, 9, 0, 0, Math.PI * 2); ctx2d.fill(); ctx2d.restore();
+      // クリーム色パーカー（お腹）
+      ctx2d.fillStyle = '#f3ecd9';
+      ctx2d.beginPath(); ctx2d.ellipse(17, 27, 12, 14, 0, 0, Math.PI * 2); ctx2d.fill();
+      // パーカーのフード縁＆ひも
+      ctx2d.strokeStyle = '#ddd0ad'; ctx2d.lineWidth = 1.4;
+      ctx2d.beginPath(); ctx2d.arc(17, 21, 11, 0.15 * Math.PI, 0.85 * Math.PI); ctx2d.stroke();
+      ctx2d.beginPath(); ctx2d.moveTo(13, 28); ctx2d.lineTo(12, 35); ctx2d.stroke();
+      ctx2d.beginPath(); ctx2d.moveTo(21, 28); ctx2d.lineTo(22, 35); ctx2d.stroke();
+      // 顔の白い部分
+      ctx2d.fillStyle = '#f7f1e1';
+      ctx2d.beginPath(); ctx2d.ellipse(17, 15, 10, 9, 0, 0, Math.PI * 2); ctx2d.fill();
+      // ほっぺ（ピンク）
+      ctx2d.fillStyle = '#f6b8c4';
+      ctx2d.beginPath(); ctx2d.arc(9, 17, 2.6, 0, Math.PI * 2); ctx2d.fill();
+      ctx2d.beginPath(); ctx2d.arc(25, 17, 2.6, 0, Math.PI * 2); ctx2d.fill();
+      // にっこり目（^_^）
+      ctx2d.strokeStyle = '#2b2b2b'; ctx2d.lineWidth = 1.6; ctx2d.lineCap = 'round';
+      ctx2d.beginPath(); ctx2d.moveTo(9, 15); ctx2d.quadraticCurveTo(12, 11, 15, 15); ctx2d.stroke();
+      ctx2d.beginPath(); ctx2d.moveTo(19, 15); ctx2d.quadraticCurveTo(22, 11, 25, 15); ctx2d.stroke();
+      ctx2d.lineCap = 'butt';
+      // くちばし（オレンジ）
+      ctx2d.fillStyle = '#f5a623';
+      ctx2d.beginPath(); ctx2d.moveTo(14, 18); ctx2d.lineTo(20, 18); ctx2d.lineTo(17, 22); ctx2d.closePath(); ctx2d.fill();
+      ctx2d.restore();
+    }
+ 
+    function update() {
+      if (!gameRunning) return;
+ 
+      // 左右移動：矢印/ボタンを押したときだけ動く（自動では前進しない）
+      const moveSpeed = 6 * SCALE;
+      const anchorX = canvas.width * 0.4; // ここを超えたら前進（スクロール）に切り替え
+      let advancing = false;
+      if (keysPressed['ArrowLeft'] || keysPressed['KeyA'] || touchMove.left) {
+        player.x = Math.max(0, player.x - moveSpeed); // 左へ（ミサイル回避にも）
+        facing = -1;
+      }
+      if (keysPressed['ArrowRight'] || keysPressed['KeyD'] || touchMove.right) {
+        facing = 1;
+        if (player.x < anchorX) {
+          player.x = Math.min(anchorX, player.x + moveSpeed); // 画面内を右へ歩く
+        } else {
+          distance += scrollSpeed; // 前進（ワールドをスクロール）
+          advancing = true;
+        }
+      }
+ 
+      // 重力・ジャンプ
+      player.vy += 0.8 * SCALE;
+      player.y += player.vy;
+      if (player.y >= groundY - player.h) {
+        player.y = groundY - player.h;
+        player.vy = 0;
+        player.jumping = false;
+      }
+ 
+      // 前進している間だけ障害物・コインを生成（ミサイルは常に降ってくる）
+      if (advancing) { spawnObstacle(); spawnCoin(); }
+      spawnMissile();
+ 
+      // 障害物との当たり判定（ぶつかると少し戻されるだけ。5回でゲームオーバーは廃止）
+      let hitObstacle = false;
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const o = obstacles[i];
+        const playerWorldX = player.x + distance;
+        if (o.x < distance - 100) {
+          obstacles.splice(i, 1);
+        } else if (!hitObstacle && playerWorldX + player.w > o.x && playerWorldX < o.x + o.w && player.y + player.h > groundY - o.h) {
+          hitObstacle = true;
+          player.x = Math.max(0, player.x - 20 * SCALE);
+          player.vy = -8 * SCALE;
+          player.jumping = true;
+          break;
+        }
+      }
+ 
+      // ミサイル更新＆被弾判定（5回でゲームオーバー）
+      for (let i = missiles.length - 1; i >= 0; i--) {
+        const m = missiles[i];
+        m.y += m.vy;
+        if (m.y > canvas.height + 50) { missiles.splice(i, 1); continue; }
+        if (m.x < player.x + player.w && m.x + m.w > player.x &&
+            m.y < player.y + player.h && m.y + m.h > player.y) {
+          missiles.splice(i, 1);
+          missileHitCount++;
+          thunderSound();
+          if (missileHitCount >= 5) { loseGame('ゲームオーバー', 'ミサイルに5回当たっちゃった…'); return; }
+        }
+      }
+ 
+      // コイン取得
+      coins.forEach(coin => {
+        if (!coin.collected) {
+          const playerWorldX = player.x + distance;
+          if (playerWorldX + player.w > coin.x - 15 * SCALE && playerWorldX < coin.x + 15 * SCALE &&
+              player.y + player.h > coin.y - 15 * SCALE && player.y < coin.y + 15 * SCALE) {
+            coin.collected = true;
+            score += 100;
+            document.getElementById('scoreDisplay').textContent = `${score}`;
+            coinCollectSound();
+          }
+        }
+        coin.rotation += 0.1;
+      });
+      coins = coins.filter(c => c.x < distance + canvas.width + 200);
+ 
+      const playerWorldX = player.x + distance;
+ 
+      // ★ ゴール（ペンギン）はワールド座標 goalDist に固定配置。
+      //    プレイヤーがそこへ到達したらクリア。
+      const penguinScreenX = goalDist - distance;
+      if (playerWorldX + player.w >= goalDist - 120) { winGame(); return; }
+ 
+      /* ---- 描画 ---- */
+      ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+      const grad = ctx2d.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, '#0f3460');
+      grad.addColorStop(1, '#16213e');
+      ctx2d.fillStyle = grad;
+      ctx2d.fillRect(0, 0, canvas.width, canvas.height);
+      ctx2d.fillStyle = '#2d5a27';
+      ctx2d.fillRect(0, groundY, canvas.width, canvas.height - groundY);
+      ctx2d.fillStyle = '#4a7c3f';
+      ctx2d.fillRect(0, groundY, canvas.width, 4);
+ 
+      // 障害物
+      obstacles.forEach(o => {
+        const screenX = o.x - distance;
+        if (screenX > -100 && screenX < canvas.width + 100) {
+          ctx2d.fillStyle = '#c0392b';
+          ctx2d.fillRect(screenX, groundY - o.h, o.w, o.h);
+          ctx2d.fillStyle = '#e74c3c';
+          ctx2d.fillRect(screenX + 2, groundY - o.h + 2, o.w - 4, o.h - 4);
+        }
+      });
+ 
+      // コイン
+      coins.forEach(coin => {
+        if (!coin.collected) {
+          const screenX = coin.x - distance;
+          if (screenX > -50 && screenX < canvas.width + 50) {
+            ctx2d.save();
+            ctx2d.translate(screenX, coin.y);
+            ctx2d.rotate(coin.rotation);
+            ctx2d.fillStyle = '#f1c40f';
+            ctx2d.beginPath(); ctx2d.arc(0, 0, 10 * SCALE, 0, Math.PI * 2); ctx2d.fill();
+            ctx2d.strokeStyle = '#e8b708'; ctx2d.lineWidth = 2 * SCALE;
+            ctx2d.beginPath(); ctx2d.arc(0, 0, 10 * SCALE, 0, Math.PI * 2); ctx2d.stroke();
+            ctx2d.restore();
+          }
+        }
+      });
+ 
+      // ミサイル描画
+      missiles.forEach(drawMissile);
+ 
+      // ゴール旗＋ペンギン（ワールド座標 goalDist に配置。近づくと画面に現れる）
+      if (penguinScreenX < canvas.width + 160 && penguinScreenX > -200) {
+        const flagX = penguinScreenX + 70;
+        ctx2d.fillStyle = '#e74c3c';
+        ctx2d.fillRect(flagX, groundY - 340, 14, 340);
+        ctx2d.fillStyle = '#c0392b';
+        ctx2d.beginPath();
+        ctx2d.moveTo(flagX + 14, groundY - 340);
+        ctx2d.lineTo(flagX + 54, groundY - 300);
+        ctx2d.lineTo(flagX + 14, groundY - 260);
+        ctx2d.fill();
+        ctx2d.fillStyle = '#ffd700';
+        ctx2d.font = 'bold 24px sans-serif';
+        ctx2d.fillText('GOAL', flagX - 14, groundY - 350);
+        drawPenguin(penguinScreenX, groundY - 140, 6);
+      }
+ 
+      // プレイヤー
+      drawCharacter(player.x, player.y);
+ 
+      // ミサイル被弾カウント
+      ctx2d.fillStyle = '#fff';
+      ctx2d.font = 'bold 22px sans-serif';
+      ctx2d.fillText(`ミサイル: ${missileHitCount}/5`, 20, 96);
+ 
+      // 進捗バー（ゴールまでの距離ベース）
+      const prog = Math.min(playerWorldX / goalDist, 1);
+      ctx2d.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx2d.fillRect(20, canvas.height - 20, canvas.width - 40, 8);
+      ctx2d.fillStyle = '#ffd700';
+      ctx2d.fillRect(20, canvas.height - 20, (canvas.width - 40) * prog, 8);
+      ctx2d.fillStyle = '#ffd700';
+      ctx2d.font = 'bold 18px sans-serif';
+      ctx2d.fillText(`${Math.floor(prog * 100)}%`, canvas.width / 2 - 24, canvas.height - 5);
+ 
+      frameId = requestAnimationFrame(update);
+    }
+ 
+    function startGame() {
+      document.getElementById('startScreen').classList.add('hidden');
+      document.getElementById('hud').classList.remove('hidden');
+      document.getElementById('touchControls').classList.remove('hidden');
+      document.getElementById('resultOverlay').classList.add('hidden');
+      resizeCanvas();
+      gameRunning = true; gameOver = false;
+      timeLeft = 90; distance = 0; score = 0; collisionCount = 0;
+      obstacles = []; coins = []; missiles = []; missileHitCount = 0;
+      player.x = 80; player.y = groundY - player.h; player.vy = 0;
+      scrollSpeed = 4 * SCALE;
+      touchMove.left = false; touchMove.right = false;
+      facing = 1; // スタート時は右（進行方向）向き
+      document.getElementById('scoreDisplay').textContent = '0';
+      document.getElementById('timerDisplay').textContent = '90';
+      startBGM();
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        document.getElementById('timerDisplay').textContent = timeLeft;
+        if (timeLeft <= 0) loseGame();
+        if (timeLeft < 20) scrollSpeed = 6 * SCALE; // 終盤は少し加速
+      }, 1000);
+      update();
+    }
+ 
+    function winGame() {
+      gameRunning = false; gameOver = true;
+      stopBGM(); clearInterval(timerInterval); cancelAnimationFrame(frameId);
+      document.getElementById('touchControls').classList.add('hidden');
+      const overlay = document.getElementById('resultOverlay');
+      overlay.classList.remove('hidden');
+      overlay.style.background = 'rgba(0,0,0,0.7)';
+      overlay.style.zIndex = '9999';
+      overlay.style.display = 'flex';
+      document.getElementById('lightningContainer').classList.add('hidden');
+      document.getElementById('resultContent').innerHTML = `
+        <div class="text-6xl mb-4">🎉🎆✨</div>
+        <h2 class="text-4xl text-yellow-300 font-bold mb-4" style="font-family:'Noto Sans JP',sans-serif;">ゴール！</h2>
+        <p class="text-white text-2xl mb-6" style="font-family:'Noto Sans JP',sans-serif;">スコア: ${score}点</p>
+        <button onclick="location.reload()" class="px-6 py-3 bg-pink-500 text-white rounded-xl font-bold active:scale-95 hover:scale-105 transition" style="font-family:'Noto Sans JP',sans-serif;">もう一回</button>
+      `;
+      launchFireworks(); fireworkSound();
+      setTimeout(() => {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance('おめでとうございます');
+        u.lang = 'ja-JP'; u.pitch = 2.2; u.rate = 1.1; u.volume = 1.0;
+        const voices = speechSynthesis.getVoices();
+        let v = null;
+        for (let voice of voices) { if (voice.lang.startsWith('ja')) { v = voice; if (/Female|female|女/.test(voice.name)) break; } }
+        if (v) u.voice = v;
+        speechSynthesis.speak(u);
+      }, 400);
+      setTimeout(() => { fireworkSound(); launchFireworks(); }, 800);
+      setTimeout(() => { fireworkSound(); launchFireworks(); }, 1600);
+    }
+ 
+    function loseGame(title, sub) {
+      title = title || 'タイムオーバー';
+      sub = sub || 'あーん、ショックだわ';
+      gameRunning = false; gameOver = true;
+      stopBGM(); clearInterval(timerInterval); cancelAnimationFrame(frameId);
+      document.getElementById('touchControls').classList.add('hidden');
+      const overlay = document.getElementById('resultOverlay');
+      overlay.classList.remove('hidden');
+      overlay.style.background = 'rgba(10,10,30,0.85)';
+      overlay.style.zIndex = '9999';
+      overlay.style.display = 'flex';
+      const lc = document.getElementById('lightningContainer');
+      lc.classList.remove('hidden');
+      lc.innerHTML = '<div class="lightning-flash"></div>';
+      setTimeout(() => { lc.innerHTML = ''; }, 1000);
+      document.getElementById('resultContent').innerHTML = `
+        <div class="text-6xl mb-4">⚡😢⚡</div>
+        <h2 class="text-4xl text-red-400 font-bold mb-4" style="font-family:'Noto Sans JP',sans-serif;">${title}</h2>
+        <p class="text-white text-2xl mb-6" style="font-family:'Noto Sans JP',sans-serif;">${sub}</p>
+        <button onclick="location.reload()" class="px-6 py-3 bg-blue-500 text-white rounded-xl font-bold active:scale-95 hover:scale-105 transition" style="font-family:'Noto Sans JP',sans-serif;">リトライ</button>
+      `;
+      thunderSound();
+      setTimeout(() => {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(sub);
+        u.lang = 'ja-JP'; u.pitch = 2.0; u.rate = 0.9; u.volume = 1.0;
+        const voices = speechSynthesis.getVoices();
+        let v = null;
+        for (let voice of voices) { if (voice.lang.startsWith('ja')) { v = voice; if (/Female|female|女/.test(voice.name)) break; } }
+        if (v) u.voice = v;
+        speechSynthesis.speak(u);
+      }, 500);
+    }
+ 
+    function launchFireworks() {
+      const container = document.getElementById('fireworksContainer');
+      container.innerHTML = '';
+      const colors = ['#ff4757', '#ffd700', '#00d2d3', '#ff6b81', '#7bed9f', '#ff9ff3'];
+      for (let f = 0; f < 5; f++) {
+        setTimeout(() => {
+          const cx = Math.random() * 80 + 10;
+          const cy = Math.random() * 40 + 10;
+          for (let i = 0; i < 12; i++) {
+            const p = document.createElement('div');
+            p.className = 'firework-particle';
+            const angle = (i / 12) * Math.PI * 2;
+            const dist = 60 + Math.random() * 40;
+            p.style.left = cx + '%'; p.style.top = cy + '%';
+            p.style.width = '8px'; p.style.height = '8px';
+            p.style.background = colors[Math.floor(Math.random() * colors.length)];
+            p.style.transform = `translate(${Math.cos(angle) * dist}px, ${Math.sin(angle) * dist}px)`;
+            p.style.animationDelay = Math.random() * 0.3 + 's';
+            container.appendChild(p);
+          }
+        }, f * 400);
+      }
+    }
+ 
+    document.getElementById('startBtn').addEventListener('click', startGame);
+  </script>
+ </body>
+</html>
+ 
