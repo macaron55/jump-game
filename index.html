@@ -299,7 +299,7 @@
 
     // 上から降ってくるミサイル
     function spawnMissile() {
-      if (Math.random() < 0.004) {
+      if (Math.random() < 0.006) {
         const w = 14 * SCALE, h = 34 * SCALE;
         const mx = Math.random() * (canvas.width - w);
         missiles.push({ x: mx, y: -h, vy: (4 + Math.random() * 3) * SCALE, w: w, h: h });
